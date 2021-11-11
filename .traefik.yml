@@ -1,9 +1,9 @@
-displayName: Demo Plugin
+displayName: Phantom Token
 type: middleware
 
-import: github.com/traefik/plugindemo
+import: github.com/JacobPlaster/traefik-phantom-token
 
-summary: '[Demo] Add Request Header'
+summary: 'Uses an external URL to introspect and conver a phantom token (opaque token) to a JWT which is forwarded as a header.'
 
 testData:
   Headers:
