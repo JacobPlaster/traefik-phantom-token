@@ -1,5 +1,5 @@
 // Package plugindemo a demo plugin.
-package phatnomtoken
+package traefik_phantom_token
 
 import (
 	"context"
@@ -69,6 +69,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	// load the jwks from the config
+	fmt.Println("---", config.Jwks)
 	set, err := jwk.Parse([]byte(config.Jwks))
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse jwks: %s", err.Error())
@@ -79,7 +80,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		name:     name,
 		jwkSet:   set,
 		config:   config,
-		template: template.New("demo").Delims("[[", "]]"),
+		template: template.New("traefik_phantom_token").Delims("[[", "]]"),
 	}, nil
 }
 
