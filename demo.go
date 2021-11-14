@@ -3,32 +3,47 @@ package traefik_phantom_token
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"github.com/golang-jwt/jwt/v4"
-	"github.com/lestrrat-go/jwx/jwk"
+	"github.com/s12v/go-jwks"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"text/template"
+	"time"
 )
 
 // Config the plugin configuration.
 type Config struct {
-	VerifyJwt         bool   `json:"verifyJwks,omitempty"`
-	Jwks              string `json:"jwks,omitempty"`
-	ClientId          string `json:"clientId,omitempty"`
-	ClientSecret      string `json:"clientSecret,omitempty"`
+	VerifyJwt           bool   `json:"verifyJwks,omitempty"`
+	JwksUrl             string `json:"jwksUrl,omitempty"`
+	ClientId            string `json:"clientId,omitempty"`
+	ClientSecret        string `json:"clientSecret,omitempty"`
 	ForwardedAuthHeader string `json:"forwardUserHeader,omitempty"`
-	IntrospectUrl     string `json:"introspectUrl,omitempty"`
+	IntrospectUrl       string `json:"introspectUrl,omitempty"`
+}
+
+type JSONWebKeys struct {
+	Kty string `json:"kty"`
+	Kid string `json:"kid"`
+	Use string `json:"use"`
+	N string `json:"n"`
+	E string `json:"e"`
+	X5c []string `json:"x5c"`
+}
+
+type Jwks struct {
+	Keys []JSONWebKeys `json:"keys"`
 }
 
 const (
-	defaultJwks = ""
 	defaultVerifyJwt = true
+	defaultJwksUrl = ""
 	defaultForwardAuthHeader = "X-Forward-Auth"
 	defaultIntrospectUrl = ""
 	defaultClientId = ""
@@ -38,7 +53,7 @@ const (
 // CreateConfig creates the default plugin configuration.
 func CreateConfig() *Config {
 	return &Config{
-		Jwks: defaultJwks,
+		JwksUrl: defaultJwksUrl,
 		VerifyJwt: defaultVerifyJwt,
 		ForwardedAuthHeader: defaultForwardAuthHeader,
 		IntrospectUrl: defaultIntrospectUrl,
@@ -51,15 +66,15 @@ func CreateConfig() *Config {
 type PhantomPlugin struct {
 	next     http.Handler
 	config   *Config
-	jwkSet   jwk.Set
+	jwkClient jwks.JWKSClient
 	name     string
 	template *template.Template
 }
 
 // New created a new Demo plugin.
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
-	if config.VerifyJwt && len(config.Jwks) == 0 {
-		return nil, fmt.Errorf("if veifyJwt is true then jwks cannot be empty")
+	if config.VerifyJwt && len(config.JwksUrl) == 0 {
+		return nil, fmt.Errorf("if veifyJwt is true then jwksUrl cannot be empty")
 	}
 	if len(config.ForwardedAuthHeader) == 0 {
 		return nil, fmt.Errorf("forwardedUserHeader cannot be empty")
@@ -68,20 +83,17 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 		return nil, fmt.Errorf("introspectUrl cannot be empty")
 	}
 
-	// load the jwks from the config
-	jwks, err := base64.StdEncoding.DecodeString(config.Jwks)
-	fmt.Println(string(jwks))
-	fmt.Println(config)
-	set, err := jwk.Parse(jwks)
-	if err != nil {
-		return nil, fmt.Errorf("unable to parse jwks: %s", err.Error())
-	}
-	fmt.Println("****")
+	jwksSource := jwks.NewWebSource(config.JwksUrl)
+	jwksC := jwks.NewDefaultClient(
+		jwksSource,
+		time.Hour,    // Refresh keys every 1 hour
+		12*time.Hour, // Expire keys after 12 hours
+	)
 
 	return &PhantomPlugin{
 		next:     next,
 		name:     name,
-		jwkSet:   set,
+		jwkClient: jwksC,
 		config:   config,
 		template: template.New("traefik_phantom_token").Delims("[[", "]]"),
 	}, nil
@@ -161,13 +173,9 @@ func (a *PhantomPlugin) getKey(token *jwt.Token) (interface{}, error) {
 	if !ok {
 		return nil, errors.New("expecting JWT header to have string kid")
 	}
-	if key, ok := a.jwkSet.LookupKeyID(keyID); ok {
-		var k interface{}
-		err := key.Raw(&k)
-		if err != nil {
-			return nil, err
-		}
-		return k, nil
+	k, err := a.jwkClient.GetEncryptionKey(keyID)
+	if err != nil {
+		return nil, err
 	}
-	return nil, fmt.Errorf("unable to find key %q", keyID)
+	return k.Public().Key.(*rsa.PublicKey), nil
 }
