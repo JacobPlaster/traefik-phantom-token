@@ -69,11 +69,14 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	// load the jwks from the config
-	fmt.Println("---", config.Jwks)
-	set, err := jwk.Parse([]byte(config.Jwks))
+	jwks, err := base64.StdEncoding.DecodeString(config.Jwks)
+	fmt.Println(string(jwks))
+	fmt.Println(config)
+	set, err := jwk.Parse(jwks)
 	if err != nil {
 		return nil, fmt.Errorf("unable to parse jwks: %s", err.Error())
 	}
+	fmt.Println("****")
 
 	return &PhantomPlugin{
 		next:     next,
